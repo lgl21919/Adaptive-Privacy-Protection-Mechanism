@@ -1,0 +1,156 @@
+name: "test-network"
+version: 1.0.0
+
+client:
+  organization: Org1
+  logging:
+    level: info
+  cryptoconfig:
+    path: "../../../fabric-samples/test-network/organizations"
+  credentialStore:
+    path: "../fabric-samples/test-network/organizations/peerOrganizations/org1.example.com/users"
+    cryptoStore:
+      path: "../../../fabric-samples/test-network/organizations/peerOrganizations/org1.example.com/users"
+  BCCSP:
+    security:
+      enabled: true
+      default:
+        provider: "SW"
+      hashAlgorithm: "SHA2"
+      softVerify: true
+      level: 256
+
+channels:
+  mychannel:
+    peers:
+      peer0.org1.example.com:
+        endorsingPeer: true
+        chaincodeQuery: true
+        ledgerQuery: true
+        eventSource: true
+      peer0.org2.example.com:
+        endorsingPeer: true
+        chaincodeQuery: true
+        ledgerQuery: true
+        eventSource: true
+    policies:
+      queryChannelConfig:
+        minResponses: 1
+        maxTargets: 1
+        retryOpts:
+          attempts: 5
+          initialBackoff: 1s
+          maxBackoff: 10s
+          backoffFactor: 2.0
+
+organizations:
+  Org1:
+    mspid: Org1MSP
+    cryptoPath: "peerOrganizations/org1.example.com/users/{username}@org1.example.com/msp"
+    peers:
+      - peer0.org1.example.com
+    certificateAuthorities:
+      - ca-org1
+  
+  Org2:
+    mspid: Org2MSP
+    cryptoPath: "peerOrganizations/org2.example.com/users/{username}@org2.example.com/msp"
+    peers:
+      - peer0.org2.example.com
+    certificateAuthorities:
+      - ca-org2
+
+  Org3:
+    mspid: Org3MSP
+    cryptoPath: "peerOrganizations/org3.example.com/users/{username}@org3.example.com/msp"
+    peers:
+      - peer0.org3.example.com
+    certificateAuthorities:
+      - ca-org3
+
+  OrdererOrg:
+    mspid: OrdererMSP
+    cryptoPath: "ordererOrganizations/example.com/users/{username}@example.com/msp"
+
+orderers:
+  orderer.example.com:
+    url: localhost:7050
+    grpcOptions:
+      ssl-target-name-override: orderer.example.com
+      hostnameOverride: orderer.example.com
+    tlsCACerts:
+      path: "../../../fabric-samples/test-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem"
+
+peers:
+  peer0.org1.example.com:
+    url: localhost:7051
+    grpcOptions:
+      ssl-target-name-override: peer0.org1.example.com
+      hostnameOverride: peer0.org1.example.com
+      keep-alive-time: 0s
+      keep-alive-timeout: 20s
+      keep-alive-permit: false
+      fail-fast: false
+      allow-insecure: false
+    tlsCACerts:
+      path: "../../../fabric-samples/test-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt"
+
+  peer0.org2.example.com:
+    url: localhost:9051
+    grpcOptions:
+      ssl-target-name-override: peer0.org2.example.com
+      hostnameOverride: peer0.org2.example.com
+      keep-alive-time: 0s
+      keep-alive-timeout: 20s
+      keep-alive-permit: false
+      fail-fast: false
+      allow-insecure: false
+    tlsCACerts:
+      path: "../../../fabric-samples/test-network/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt"
+
+  peer0.org3.example.com:
+    url: localhost:11051
+    grpcOptions:
+      ssl-target-name-override: peer0.org3.example.com
+      hostnameOverride: peer0.org3.example.com
+      keep-alive-time: 0s
+      keep-alive-timeout: 20s
+      keep-alive-permit: false
+      fail-fast: false
+      allow-insecure: false
+    tlsCACerts:
+      path: "../../../fabric-samples/test-network/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com/tls/ca.crt"
+
+certificateAuthorities:
+  ca-org1:
+    url: https://localhost:7054
+    tlsCACerts:
+      path: "../../../fabric-samples/test-network/organizations/peerOrganizations/org1.example.com/ca/ca.org1.example.com-cert.pem"
+    registrar:
+      enrollId: admin
+      enrollSecret: adminpw
+    caName: ca-org1
+    httpOptions:
+      verify: false
+
+  ca-org2:
+    url: https://localhost:8054
+    tlsCACerts:
+      path: "../../../fabric-samples/test-network/organizations/peerOrganizations/org2.example.com/ca/ca.org2.example.com-cert.pem"
+    registrar:
+      enrollId: admin
+      enrollSecret: adminpw
+    caName: ca-org2
+    httpOptions:
+      verify: false
+
+  ca-org3:
+    url: https://localhost:9054
+    tlsCACerts:
+      path: "../../../fabric-samples/test-network/organizations/peerOrganizations/org3.example.com/ca/ca.org3.example.com-cert.pem"
+    registrar:
+      enrollId: admin
+      enrollSecret: adminpw
+    caName: ca-org3
+    httpOptions:
+      verify: false

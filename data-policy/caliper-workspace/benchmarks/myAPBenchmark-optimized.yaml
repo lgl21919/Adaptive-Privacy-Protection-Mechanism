@@ -1,0 +1,102 @@
+test:
+    name: academicPublishing-contract-benchmark-optimized
+    description: Academic Publishing 性能测试基线（优化版）- 基于 encryption_chain.go 工作流程
+    workers:
+      number: 4  # 增加工作线程数以提高并发
+    rounds:
+      # 测试场景1: 存储数据保护策略性能测试（优化）
+      - label: storeDataProtectionPolicy
+        description: 测试存储数据保护策略的性能
+        txDuration: 60  # 增加测试时间以获得更稳定的结果
+        rateControl:
+          type: fixed-load
+          opts:
+            transactionLoad: 20  # 提高目标 TPS
+        workload:
+          module: workload/academicPublishing.js
+          arguments:
+            contractId: academicPublishing
+            testType: storePolicy
+            policyCount: 3  # 减少初始化数据量，避免阻塞
+            paperCount: 0
+
+      # 测试场景2: 存储加密论文性能测试（优化）
+      - label: storeEncryptedPaper
+        description: 测试存储加密论文的性能
+        txDuration: 60
+        rateControl:
+          type: fixed-load
+          opts:
+            transactionLoad: 15  # 提高目标 TPS
+        workload:
+          module: workload/academicPublishing.js
+          arguments:
+            contractId: academicPublishing
+            testType: storePaper
+            policyCount: 3
+            paperCount: 5  # 减少初始化数据量
+
+      # 测试场景3: 获取加密论文性能测试（优化）
+      - label: getEncryptedPaper
+        description: 测试获取加密论文的性能
+        txDuration: 60
+        rateControl:
+          type: fixed-load
+          opts:
+            transactionLoad: 30  # 查询操作可以更高
+        workload:
+          module: workload/academicPublishing.js
+          arguments:
+            contractId: academicPublishing
+            testType: getPaper
+            policyCount: 3
+            paperCount: 10  # 减少初始化数据量
+
+      # 测试场景4: 获取数据保护策略性能测试（优化）
+      - label: getDataProtectionPolicy
+        description: 测试获取数据保护策略的性能
+        txDuration: 60
+        rateControl:
+          type: fixed-load
+          opts:
+            transactionLoad: 30  # 查询操作可以更高
+        workload:
+          module: workload/academicPublishing.js
+          arguments:
+            contractId: academicPublishing
+            testType: getPolicy
+            policyCount: 5
+            paperCount: 5
+
+      # 测试场景5: 获取重加密密钥性能测试（优化）
+      - label: getReEncryptionKey
+        description: 测试获取重加密密钥的性能
+        txDuration: 60
+        rateControl:
+          type: fixed-load
+          opts:
+            transactionLoad: 30
+        workload:
+          module: workload/academicPublishing.js
+          arguments:
+            contractId: academicPublishing
+            testType: getReKey
+            policyCount: 3
+            paperCount: 10
+
+      # 测试场景6: 混合操作性能测试（优化）
+      - label: mixedOperations
+        description: 测试混合操作的性能（模拟真实场景）
+        txDuration: 120  # 混合测试需要更长时间
+        rateControl:
+          type: fixed-load
+          opts:
+            transactionLoad: 20  # 提高目标 TPS
+        workload:
+          module: workload/academicPublishing.js
+          arguments:
+            contractId: academicPublishing
+            testType: mixed
+            policyCount: 5
+            paperCount: 10
+

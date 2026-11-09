@@ -1,0 +1,23 @@
+{
+  "name": "academic-publishing-caliper",
+  "version": "1.0.0",
+  "description": "Academic Publishing Caliper performance test workspace",
+  "scripts": {
+    "test": "caliper launch manager --caliper-workspace . --caliper-benchconfig benchmarks/myAPBenchmark.yaml --caliper-networkconfig networks/networkConfig.yaml --caliper-bind-sut fabric:fabric-gateway --caliper-flow-only-test",
+    "bind": "caliper bind --caliper-bind-sut fabric:fabric-gateway --caliper-bind-cwd ."
+  },
+  "keywords": [
+    "caliper",
+    "hyperledger",
+    "fabric",
+    "benchmark"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@hyperledger/fabric-gateway": "^1.5.0",
+    "@grpc/grpc-js": "^1.10.3",
+    "@hyperledger/fabric-protos": "^0.2.1"
+  }
+}
+

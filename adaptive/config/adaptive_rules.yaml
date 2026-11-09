@@ -1,0 +1,223 @@
+# Declarative adaptive privacy rule base
+# Policy = f(s, m, r, d, l) → {IAPP_Strategy, DAPP_Strategy}
+#
+# Config catalog version MUST match IdealSpec / reasoning.ConfigCatalogVersion.
+# When adding IAPP/DAPP tokens or pairs, bump version and update DefaultIdealSpec.
+#
+# Dimensions:
+#   s — phase (SUBMISSION, REVIEW, PUBLICATION)
+#   m — member role (AUTHOR, EDITOR, REVIEWER)
+#   r — review mode (DOUBLE_BLIND, SINGLE_BLIND, OPEN, *)
+#   d — data type (MANUSCRIPT, MESSAGE, …, *)
+#   l — security level (0–3, *)
+#
+# Administrators may adjust adaptive behavior by editing this file
+# without redeploying chaincode. After edits run:
+#   go test ./pkg/uc -run TestHotPathIdealSpecConfigSync
+
+version: "1.0"
+
+rules:
+  # ── IAPP (Identity Adaptive Privacy Policy) ──
+  - id: sub_author_real
+    priority: 100
+    match: { s: SUBMISSION, m: AUTHOR, r: "*", d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "作者在投稿时必须使用真实身份"
+
+  - id: sub_editor_real
+    priority: 100
+    match: { s: SUBMISSION, m: EDITOR, r: "*", d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "编辑在处理投稿时使用真实身份"
+
+  - id: rev_db_author_pseudo
+    priority: 100
+    match: { s: REVIEW, m: AUTHOR, r: DOUBLE_BLIND, d: "*", l: "*" }
+    output: { iapp_strategy: PSEUDONYMOUS }
+    description: "作者在双盲审稿阶段使用伪名"
+
+  - id: rev_db_reviewer_pseudo
+    priority: 100
+    match: { s: REVIEW, m: REVIEWER, r: DOUBLE_BLIND, d: "*", l: "*" }
+    output: { iapp_strategy: PSEUDONYMOUS }
+    description: "审稿人在双盲评审中使用伪名"
+
+  - id: rev_db_editor_real
+    priority: 100
+    match: { s: REVIEW, m: EDITOR, r: DOUBLE_BLIND, d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "编辑在双盲审稿管理中使用真实身份"
+
+  - id: rev_sb_author_real
+    priority: 100
+    match: { s: REVIEW, m: AUTHOR, r: SINGLE_BLIND, d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "作者在单盲审稿阶段使用真实身份"
+
+  - id: rev_sb_reviewer_pseudo
+    priority: 100
+    match: { s: REVIEW, m: REVIEWER, r: SINGLE_BLIND, d: "*", l: "*" }
+    output: { iapp_strategy: PSEUDONYMOUS }
+    description: "审稿人在单盲评审中使用伪名"
+
+  - id: rev_sb_editor_real
+    priority: 100
+    match: { s: REVIEW, m: EDITOR, r: SINGLE_BLIND, d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "编辑在单盲审稿管理中使用真实身份"
+
+  - id: rev_open_author_real
+    priority: 100
+    match: { s: REVIEW, m: AUTHOR, r: OPEN, d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "作者在开放审稿阶段使用真实身份"
+
+  - id: rev_open_reviewer_real
+    priority: 100
+    match: { s: REVIEW, m: REVIEWER, r: OPEN, d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "审稿人在开放评审中使用真实身份"
+
+  - id: rev_open_editor_real
+    priority: 100
+    match: { s: REVIEW, m: EDITOR, r: OPEN, d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "编辑在开放审稿管理中使用真实身份"
+
+  - id: pub_author_real
+    priority: 100
+    match: { s: PUBLICATION, m: AUTHOR, r: "*", d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "出版时公开作者真实身份"
+
+  - id: pub_reviewer_real
+    priority: 100
+    match: { s: PUBLICATION, m: REVIEWER, r: "*", d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "可选择公开致谢审稿人"
+
+  - id: pub_editor_real
+    priority: 100
+    match: { s: PUBLICATION, m: EDITOR, r: "*", d: "*", l: "*" }
+    output: { iapp_strategy: REAL_IDENTITY }
+    description: "出版时公开编辑真实身份"
+
+  # ── DAPP (Data Adaptive Privacy Policy) ──
+  - id: sub_manuscript_l1
+    priority: 10
+    match: { s: SUBMISSION, m: "*", r: "*", d: MANUSCRIPT, l: "1" }
+    output: { dapp_strategy: ECDH_HKDF, security_level: 1 }
+    description: "投稿稿件基础加密"
+
+  - id: sub_manuscript_l2
+    priority: 20
+    match: { s: SUBMISSION, m: "*", r: "*", d: MANUSCRIPT, l: "2" }
+    output: { dapp_strategy: SSS, security_level: 2 }
+    description: "投稿稿件高级加密"
+
+  - id: sub_message_l1
+    priority: 10
+    match: { s: SUBMISSION, m: "*", r: "*", d: MESSAGE, l: "1" }
+    output: { dapp_strategy: ECDH_HKDF, security_level: 1 }
+    description: "投稿消息基础加密"
+
+  - id: sub_message_l2
+    priority: 20
+    match: { s: SUBMISSION, m: "*", r: "*", d: MESSAGE, l: "2" }
+    output: { dapp_strategy: PROXY_REENCRYPTION, security_level: 2 }
+    description: "投稿消息代理重加密"
+
+  - id: sub_enckey_l1
+    priority: 10
+    match: { s: SUBMISSION, m: "*", r: "*", d: ENCRYPTION_KEY, l: "1" }
+    output: { dapp_strategy: PROXY_REENCRYPTION, security_level: 1 }
+    description: "投稿密钥PRE保护"
+
+  - id: rev_manuscript_l1
+    priority: 10
+    match: { s: REVIEW, m: "*", r: "*", d: MANUSCRIPT, l: "1" }
+    output: { dapp_strategy: ECDH_HKDF, security_level: 1 }
+    description: "审稿稿件基础加密"
+
+  - id: rev_manuscript_l2
+    priority: 20
+    match: { s: REVIEW, m: "*", r: "*", d: MANUSCRIPT, l: "2" }
+    output: { dapp_strategy: SSS, security_level: 2 }
+    description: "审稿稿件高级加密"
+
+  - id: rev_supp_l1
+    priority: 10
+    match: { s: REVIEW, m: "*", r: "*", d: SUPPLEMENTARY_DATA, l: "1" }
+    output: { dapp_strategy: ECDH_HKDF, security_level: 1 }
+    description: "补充数据基础加密"
+
+  - id: rev_supp_l2
+    priority: 20
+    match: { s: REVIEW, m: "*", r: "*", d: SUPPLEMENTARY_DATA, l: "2" }
+    output: { dapp_strategy: PROXY_REENCRYPTION, security_level: 2 }
+    description: "补充数据PRE加密"
+
+  - id: rev_message_l1
+    priority: 10
+    match: { s: REVIEW, m: "*", r: "*", d: MESSAGE, l: "1" }
+    output: { dapp_strategy: ECDH_HKDF, security_level: 1 }
+    description: "审稿消息基础加密"
+
+  - id: rev_message_l2
+    priority: 20
+    match: { s: REVIEW, m: "*", r: "*", d: MESSAGE, l: "2" }
+    output: { dapp_strategy: PROXY_REENCRYPTION, security_level: 2 }
+    description: "审稿消息PRE加密"
+
+  - id: rev_final_l1
+    priority: 10
+    match: { s: REVIEW, m: "*", r: "*", d: FINAL_RECOMMENDATION, l: "1" }
+    output: { dapp_strategy: ECDH_HKDF, security_level: 1 }
+    description: "最终建议基础加密"
+
+  - id: rev_final_l2
+    priority: 20
+    match: { s: REVIEW, m: "*", r: "*", d: FINAL_RECOMMENDATION, l: "2" }
+    output: { dapp_strategy: PROXY_REENCRYPTION, security_level: 2 }
+    description: "最终建议PRE加密"
+
+  - id: rev_final_l3
+    priority: 30
+    match: { s: REVIEW, m: "*", r: "*", d: FINAL_RECOMMENDATION, l: "3" }
+    output:
+      dapp_strategy: MPC
+      enc_algorithms: [ECDH_HKDF, SSS, PROXY_REENCRYPTION]
+      compose_mode: CASCADE
+      security_level: 3
+    description: "最终建议MPC/多算法组合强加密"
+
+  - id: rev_enckey_l1
+    priority: 10
+    match: { s: REVIEW, m: "*", r: "*", d: ENCRYPTION_KEY, l: "1" }
+    output: { dapp_strategy: PROXY_REENCRYPTION, security_level: 1 }
+    description: "审稿密钥PRE保护"
+
+  - id: pub_manuscript_l1
+    priority: 10
+    match: { s: PUBLICATION, m: "*", r: "*", d: MANUSCRIPT, l: "1" }
+    output: { dapp_strategy: ECDH_HKDF, security_level: 1 }
+    description: "出版稿件基础加密"
+
+  - id: pub_manuscript_l2
+    priority: 20
+    match: { s: PUBLICATION, m: "*", r: "*", d: MANUSCRIPT, l: "2" }
+    output: { dapp_strategy: SSS, security_level: 2 }
+    description: "出版稿件高级加密"
+
+  - id: pub_message_l0
+    priority: 0
+    match: { s: PUBLICATION, m: "*", r: "*", d: MESSAGE, l: "0" }
+    output: { dapp_strategy: PUBLIC, security_level: 0 }
+    description: "出版阶段公开消息"
+
+  - id: pub_enckey_l1
+    priority: 10
+    match: { s: PUBLICATION, m: "*", r: "*", d: ENCRYPTION_KEY, l: "1" }
+    output: { dapp_strategy: PROXY_REENCRYPTION, security_level: 1 }
+    description: "出版密钥PRE保护"

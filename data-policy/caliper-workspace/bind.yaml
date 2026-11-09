@@ -1,0 +1,9 @@
+# Caliper Fabric Gateway 绑定配置文件
+# 用于指定使用 fabric-gateway 而不是 fabric-network
+
+# 注意：Caliper 可能仍然使用 fabric 作为绑定类型，但通过此文件可以指定使用 fabric-gateway 包
+# 如果 Caliper 不支持 fabric-gateway 绑定类型，可能需要手动安装依赖
+
+# 对于 fabric-gateway，需要安装以下包：
+# @hyperledger/fabric-gateway: ^1.0.0
+

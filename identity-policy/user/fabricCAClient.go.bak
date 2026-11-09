@@ -1,0 +1,352 @@
+package user
+
+import (
+    "fmt"
+    "os"
+    "path/filepath"
+    "strings"
+    "github.com/hyperledger/fabric-sdk-go/pkg/client/msp"
+    mspapi "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/msp"
+    "github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
+    "github.com/pkg/errors"
+    "crypto/x509"
+    "encoding/pem"
+)
+
+// UserManager 用户管理器
+type FabricCAClient struct {
+    sdk             *fabsdk.FabricSDK
+    mspClient       *msp.Client
+    orgName         string
+    usersPath       string // 用户存储路径
+    caCertPath      string
+    caCertDestFile  string
+}
+
+
+// NewFabricCAClient 创建新的用户管理器
+func NewFabricCAClient(sdk *fabsdk.FabricSDK, orgName string, usersPath string, caCertPath string, caCertDestFile string) (*FabricCAClient, error) {
+    // 创建客户端上下文
+    clientContext := sdk.Context(fabsdk.WithOrg(orgName))
+    
+    // 创建MSP客户端
+    mspClient, err := msp.New(clientContext)
+    if err != nil {
+        return nil, errors.Wrap(err, "failed to create MSP client")
+    }
+    
+    lowerOrg := strings.ToLower(orgName)
+    if caCertPath == "" {
+        caCertPath = defaultCACertPath(lowerOrg)
+    }
+    if caCertDestFile == "" {
+        caCertDestFile = defaultCACertDestFile(lowerOrg)
+    }
+    
+    return &FabricCAClient{
+        sdk:            sdk,
+        mspClient:      mspClient,
+        orgName:        orgName,
+        usersPath:      usersPath,
+        caCertPath:     caCertPath,
+        caCertDestFile: caCertDestFile,
+    }, nil
+}
+
+// createUserMSPStructure 创建用户MSP目录结构
+func (fca *FabricCAClient) createUserMSPStructure(username string) error {
+    userMSPPath := filepath.Join(fca.usersPath, fmt.Sprintf("%s@%s.example.com", username, strings.ToLower(fca.orgName)), "msp")
+    
+    // 创建必要的目录
+    dirs := []string{
+        userMSPPath,
+        filepath.Join(userMSPPath, "cacerts"),
+        filepath.Join(userMSPPath, "keystore"),
+        filepath.Join(userMSPPath, "signcerts"),
+    }
+    
+    for _, dir := range dirs {
+        if err := os.MkdirAll(dir, 0755); err != nil {
+            return errors.Wrapf(err, "failed to create directory %s", dir)
+        }
+    }
+    
+    // 创建config.yaml文件
+    configTemplate := `NodeOUs:
+  Enable: true
+  ClientOUIdentifier:
+    Certificate: cacerts/%[1]s
+    OrganizationalUnitIdentifier: client
+  PeerOUIdentifier:
+    Certificate: cacerts/%[1]s
+    OrganizationalUnitIdentifier: peer
+  AdminOUIdentifier:
+    Certificate: cacerts/%[1]s
+    OrganizationalUnitIdentifier: admin
+  OrdererOUIdentifier:
+    Certificate: cacerts/%[1]s
+    OrganizationalUnitIdentifier: orderer`
+    configContent := fmt.Sprintf(configTemplate, fca.caCertDestFile)
+    
+    configPath := filepath.Join(userMSPPath, "config.yaml")
+    if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+        return errors.Wrapf(err, "failed to create config.yaml for user %s", username)
+    }
+    
+    // 创建空的IssuerPublicKey和IssuerRevocationPublicKey文件
+    // 这些文件通常由CA在登记过程中填充
+    issuerFiles := []string{
+        filepath.Join(userMSPPath, "IssuerPublicKey"),
+        filepath.Join(userMSPPath, "IssuerRevocationPublicKey"),
+        filepath.Join(userMSPPath, "user"),
+    }
+    
+    for _, file := range issuerFiles {
+        if err := os.WriteFile(file, []byte(""), 0644); err != nil {
+            return errors.Wrapf(err, "failed to create file %s", file)
+        }
+    }
+    
+    fmt.Printf("Created MSP structure for user %s at %s\n", username, userMSPPath)
+    return nil
+}
+
+// RegisterUser 注册新用户
+func (fca *FabricCAClient) RegisterUser(username, userType string, attributes []msp.Attribute) (string, error) {
+    // 创建用户MSP目录结构
+    if err := fca.createUserMSPStructure(username); err != nil {
+        return "", errors.Wrapf(err, "failed to create MSP structure for user %s", username)
+    }
+    
+    // 创建注册请求
+    registrationRequest := &msp.RegistrationRequest{
+        Name:       username,
+        Type:       userType, // "client", "peer", "app", "orderer"
+        Attributes: attributes,
+        // 可以设置其他选项如MaxEnrollments
+        MaxEnrollments: 1,
+    }
+    
+    // 执行注册
+    enrollmentSecret, err := fca.mspClient.Register(registrationRequest)
+    if err != nil {
+        return "", errors.Wrapf(err, "failed to register user %s", username)
+    }
+    
+    fmt.Printf("User %s registered successfully with secret: %s\n", username, enrollmentSecret)
+    return enrollmentSecret, nil
+}
+
+// EnrollUser 登记用户（获取证书）
+func (fca *FabricCAClient) EnrollUser(username, enrollmentSecret string) error {
+    // 创建登记请求
+    err := fca.mspClient.Enroll(username, msp.WithSecret(enrollmentSecret))
+    if err != nil {
+        return errors.Wrapf(err, "failed to enroll user %s", username)
+    }
+    
+    // 登记成功后，复制证书和私钥到正确的目录结构
+    if err := fca.copyCredentialsToUserMSP(username); err != nil {
+        return errors.Wrapf(err, "failed to copy credentials for user %s", username)
+    }
+    
+    fmt.Printf("User %s enrolled successfully\n", username)
+    return nil
+}
+
+// copyCredentialsToUserMSP 复制证书和私钥到用户MSP目录
+func (fca *FabricCAClient) copyCredentialsToUserMSP(username string) error {
+    // 获取用户的签名身份以访问证书和私钥
+    signingIdentity, err := fca.mspClient.GetSigningIdentity(username)
+    if err != nil {
+        return errors.Wrapf(err, "failed to get signing identity for user %s", username)
+    }
+    
+    // 构建用户MSP路径
+    userMSPPath := filepath.Join(fca.usersPath, fmt.Sprintf("%s@%s.example.com", username, strings.ToLower(fca.orgName)), "msp")
+    
+    // 获取证书内容
+    cert := signingIdentity.EnrollmentCertificate()
+    if len(cert) > 0 {
+        certPath := filepath.Join(userMSPPath, "signcerts", "cert.pem")
+        if err := os.WriteFile(certPath, cert, 0644); err != nil {
+            return errors.Wrapf(err, "failed to write certificate for user %s", username)
+        }
+        fmt.Printf("Certificate saved to %s\n", certPath)
+    }
+    
+    // 获取私钥内容
+    privateKey, err := signingIdentity.PrivateKey().Bytes()
+    if err != nil {
+        return errors.Wrapf(err, "failed to get private key bytes for user %s", username)
+    }
+    
+    if len(privateKey) > 0 {
+        // 生成私钥文件名（通常以_sk结尾）
+        keyPath := filepath.Join(userMSPPath, "keystore", fmt.Sprintf("%s_sk", username))
+        if err := os.WriteFile(keyPath, privateKey, 0600); err != nil {
+            return errors.Wrapf(err, "failed to write private key for user %s", username)
+        }
+        fmt.Printf("Private key saved to %s\n", keyPath)
+    }
+    
+    // 复制CA证书到cacerts目录
+    if err := fca.copyCACertificate(userMSPPath); err != nil {
+        return errors.Wrapf(err, "failed to copy CA certificate for user %s", username)
+    }
+    
+    // 添加：处理颁发者公钥
+    if err := fca.handleIssuerKeys(userMSPPath); err != nil {
+        return errors.Wrapf(err, "failed to handle issuer keys for user %s", username)
+    }
+    
+    return nil
+}
+
+// copyCACertificate 复制CA证书到用户MSP目录
+func (fca *FabricCAClient) copyCACertificate(userMSPPath string) error {
+    // 读取CA证书
+    caCert, err := os.ReadFile(fca.caCertPath)
+    if err != nil {
+        return errors.Wrapf(err, "failed to read CA certificate from %s", fca.caCertPath)
+    }
+    
+    // 写入到用户MSP的cacerts目录
+    destPath := filepath.Join(userMSPPath, "cacerts", fca.caCertDestFile)
+    if err := os.WriteFile(destPath, caCert, 0644); err != nil {
+        return errors.Wrapf(err, "failed to write CA certificate to %s", destPath)
+    }
+    
+    fmt.Printf("CA certificate copied to %s\n", destPath)
+    return nil
+}
+
+// GetSigningIdentity 获取用户的签名身份
+func (fca *FabricCAClient) GetSigningIdentity(username string) (mspapi.SigningIdentity, error) {
+    signingIdentity, err := fca.mspClient.GetSigningIdentity(username)
+    if err != nil {
+        return nil, errors.Wrapf(err, "failed to get signing identity for user %s", username)
+    }
+    
+    return signingIdentity, nil
+}
+
+// ReenrollUser 重新登记用户
+func (fca *FabricCAClient) ReenrollUser(username string) error {
+    err := fca.mspClient.Reenroll(username)
+    if err != nil {
+        return errors.Wrapf(err, "failed to reenroll user %s", username)
+    }
+    
+    fmt.Printf("User %s reenrolled successfully\n", username)
+    return nil
+}
+
+// RevokeUser 撤销用户
+func (fca *FabricCAClient) RevokeUser(username string, reason string) error {
+    revokeRequest := &msp.RevocationRequest{
+        Name:   username,
+        Reason: reason,
+    }
+    
+    _, err := fca.mspClient.Revoke(revokeRequest)
+    if err != nil {
+        return errors.Wrapf(err, "failed to revoke user %s", username)
+    }
+    
+    fmt.Printf("User %s revoked successfully\n", username)
+    return nil
+}
+
+// handleIssuerKeys 处理颁发者公钥文件
+func (fca *FabricCAClient) handleIssuerKeys(userMSPPath string) error {
+    // 从CA获取颁发者公钥
+    issuerPublicKey, err := fca.getIssuerPublicKeyFromCA()
+    if err != nil {
+        return errors.Wrap(err, "failed to get issuer public key from CA")
+    }
+    
+    // 写入IssuerPublicKey文件
+    issuerKeyPath := filepath.Join(userMSPPath, "IssuerPublicKey")
+    if err := os.WriteFile(issuerKeyPath, issuerPublicKey, 0644); err != nil {
+        return errors.Wrapf(err, "failed to write issuer public key to %s", issuerKeyPath)
+    }
+    
+    // 获取撤销公钥
+    revocationKey, err := fca.getRevocationPublicKeyFromCA()
+    if err != nil {
+        return errors.Wrap(err, "failed to get revocation public key from CA")
+    }
+    
+    // 写入IssuerRevocationPublicKey文件
+    revocationKeyPath := filepath.Join(userMSPPath, "IssuerRevocationPublicKey")
+    if err := os.WriteFile(revocationKeyPath, revocationKey, 0644); err != nil {
+        return errors.Wrapf(err, "failed to write revocation public key to %s", revocationKeyPath)
+    }
+    
+    return nil
+}
+
+// getIssuerPublicKeyFromCA 从CA获取颁发者公钥
+func (fca *FabricCAClient) getIssuerPublicKeyFromCA() ([]byte, error) {
+    // 方法1: 通过MSP客户端获取CA信息
+    caInfo, err := fca.mspClient.GetCAInfo()
+    if err != nil {
+        return nil, errors.Wrap(err, "failed to get CA info")
+    }
+    
+    // 从CA信息中提取公钥
+    if caInfo != nil && len(caInfo.CAChain) > 0 {
+        // 解析CA证书并提取公钥
+        return extractPublicKeyFromCert(caInfo.CAChain)
+    }
+    
+    // 方法2: 直接从CA证书文件读取并提取公钥
+    caCert, err := os.ReadFile(fca.caCertPath)
+    if err != nil {
+        return nil, errors.Wrapf(err, "failed to read CA certificate from %s", fca.caCertPath)
+    }
+    
+    return extractPublicKeyFromCert(caCert)
+}
+
+// getRevocationPublicKeyFromCA 从CA获取撤销公钥
+func (fca *FabricCAClient) getRevocationPublicKeyFromCA() ([]byte, error) {
+    // 通常撤销公钥与颁发者公钥相同，或者从CRL端点获取
+    return fca.getIssuerPublicKeyFromCA()
+}
+
+// extractPublicKeyFromCert 从证书中提取公钥
+func extractPublicKeyFromCert(certPEM []byte) ([]byte, error) {
+    block, _ := pem.Decode(certPEM)
+    if block == nil {
+        return nil, errors.New("failed to decode PEM certificate")
+    }
+    
+    cert, err := x509.ParseCertificate(block.Bytes)
+    if err != nil {
+        return nil, errors.Wrap(err, "failed to parse certificate")
+    }
+    
+    // 将公钥编码为PEM格式
+    pubKeyBytes, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+    if err != nil {
+        return nil, errors.Wrap(err, "failed to marshal public key")
+    }
+    
+    pubKeyPEM := pem.EncodeToMemory(&pem.Block{
+        Type:  "PUBLIC KEY",
+        Bytes: pubKeyBytes,
+    })
+    
+    return pubKeyPEM, nil
+}
+
+func defaultCACertPath(lowerOrg string) string {
+    base := filepath.Join("..", "..", "..", "fabric-samples", "test-network", "organizations", "peerOrganizations", fmt.Sprintf("%s.example.com", lowerOrg), "ca")
+    return filepath.Join(base, fmt.Sprintf("ca.%s.example.com-cert.pem", lowerOrg))
+}
+
+func defaultCACertDestFile(lowerOrg string) string {
+    return fmt.Sprintf("localhost-7054-ca-%s.pem", lowerOrg)
+}
